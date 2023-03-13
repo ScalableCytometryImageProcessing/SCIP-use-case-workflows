@@ -30,7 +30,7 @@ df = df.loc[numpy.load(snakemake.input.index, allow_pickle=True)]
 # drop samples not used in CytoA
 if snakemake.wildcards["full"] == "cyto":
     df = df.drop('late', level="meta_fix")
-    df = df.drop(2, level="meta_group")
+    df = df.drop(0, level="meta_group")
 
 df = df.merge(labels, left_index=True, right_index=True)
 df = df[df["meta_label"] != "unknown"]
@@ -127,7 +127,7 @@ with tempfile.TemporaryDirectory(dir="/srv/scratch/maximl/sklearn_cache") as tmp
             random_state=0
         )
 
-    test_fold = df.index.get_level_values("meta_group").map(lambda x: 0 if x == 0 else -1).values
+    test_fold = df.index.get_level_values("meta_group").map(lambda x: 0 if x == 2 else -1).values
     scores = cross_validate(
         grid, Xs, y,
         scoring=('balanced_accuracy', 'f1_macro', 'precision_macro', 'recall_macro'),
