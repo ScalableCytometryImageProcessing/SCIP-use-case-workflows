@@ -31,6 +31,10 @@ df = df.loc[numpy.load(snakemake.input.index, allow_pickle=True)]
 if snakemake.wildcards["full"] == "cyto":
     df = df.drop('late', level="meta_fix")
     df = df.drop(0, level="meta_group")
+    test_fold = df.index.get_level_values("meta_group").map(lambda x: 0 if x == 2 else -1).values
+else:
+    test_fold = df.index.to_frame().apply(
+        lambda x: 0 if (x.meta_group == 2) and (x.meta_fix == "early") else -1).values
 
 df = df.merge(labels, left_index=True, right_index=True)
 df = df[df["meta_label"] != "unknown"]
