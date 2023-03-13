@@ -17,6 +17,17 @@ from imblearn.pipeline import make_pipeline
 import pandas
 from sklearn.dummy import DummyClassifier
 
+import logging
+logging.basicConfig(
+    filename=snakemake.log[0],
+    level=logging.INFO,
+    filemode="w",
+    format="%(asctime)s;%(levelname)s;%(message)s"
+)
+
+logging.info("Snakemake config %s", snakemake.config)
+logging.info("Snakemake wildcards %s", snakemake.wildcards)
+
 # LOAD DATA
 
 df = pq.read_table(snakemake.input.features).to_pandas()
@@ -27,21 +38,42 @@ labels = pq.read_table(snakemake.input.labels).to_pandas()
 df = df[numpy.load(snakemake.input.columns, allow_pickle=True)]
 df = df.loc[numpy.load(snakemake.input.index, allow_pickle=True)]
 
-# drop samples not used in CytoA
-if snakemake.wildcards["full"] == "cyto":
-    df = df.drop('late', level="meta_fix")
-    df = df.drop(0, level="meta_group")
-    test_fold = df.index.get_level_values("meta_group").map(lambda x: 0 if x == 2 else -1).values
-else:
-    test_fold = df.index.to_frame().apply(
-        lambda x: 0 if (x["meta_group"] == 2) and (x["meta_fix"] == "early") else -1,
-        axis="columns"
-    ).values
-
 df = df.merge(labels, left_index=True, right_index=True)
 df = df[df["meta_label"] != "unknown"]
 
-print(df.shape)
+logging.info("Dataframe shape %s", df.shape)
+
+# drop samples not used in CytoA
+if snakemake.wildcards["full"] == "cyto":
+    logging.info("Using cyto paper subset")
+
+    df = df.drop('late', level="meta_fix")
+    df = df.drop(0, level="meta_group")
+    test_fold_outer = df.index.get_level_values("meta_group").map(lambda x: 0 if x == 2 else -1).values
+    outer_cv = PredefinedSplit(test_fold_outer)
+
+    inner_cv = 5
+else:
+    logging.info("Using all available samples")
+
+    test_fold_outer = df.index.to_frame().apply(
+        lambda x: 0 if (x["meta_group"] == 2) and (x["meta_fix"] == "early") else -1,
+        axis="columns"
+    ).values 
+    outer_cv = PredefinedSplit(test_fold_outer)
+
+    if "innersample" in snakemake.wildcards["grid"]:
+        logging.info("Predefining inner CV split per sample")
+
+        sel = pandas.Series([True]*df.shape[0], index=df.index)
+        sel.loc[2, :, 'early'] = False
+        inner_index = df[sel].index.to_frame(index=False)
+        unique_combos = inner_index.set_index(['meta_group','meta_fix']).index.unique()
+        test_fold_inner = inner_index.apply(lambda x: unique_combos.get_loc((x.meta_group, x.meta_fix)), axis="columns")
+        inner_cv = PredefinedSplit(test_fold_inner)
+    else:
+        logging.info("Using default shuffled stratified KFold")
+        inner_cv = 5
 
 # PREP CLASSIFICATION INPUT
 
@@ -64,11 +96,16 @@ else:
     else:
         raise ValueError(snakemake.wildcards["mask"])
 
+logging.info("X, y shape (%s, %s)", Xs.shape, y.shape)
+
 if snakemake.wildcards["model"] == 'true':
+    logging.info("Using dummy model")
     steps = [DummyClassifier(strategy="uniform", random_state=0)]
     param_distributions = {}
     resource = 'n_samples'
 else:
+    logging.info("Using XGB model")
+
     steps = [
         RandomUnderSampler(sampling_strategy="majority", random_state=0),
         RandomOverSampler(sampling_strategy="not majority", random_state=0),
@@ -100,14 +137,16 @@ with tempfile.TemporaryDirectory(dir="/srv/scratch/maximl/sklearn_cache") as tmp
         memory=tmp_path
     )
 
-    if snakemake.wildcards["grid"] == "random":
+    if snakemake.wildcards["grid"].startswith("random"):
+        logging.info("Random hpo")
+
         grid = RandomizedSearchCV(
             estimator=model,
             param_distributions=param_distributions,
             n_iter=int(snakemake.config["n"]),
             refit=True,
             n_jobs=snakemake.threads,
-            cv=5,
+            cv=inner_cv,
             scoring='balanced_accuracy',
             verbose=2,
             return_train_score=True,
@@ -115,6 +154,8 @@ with tempfile.TemporaryDirectory(dir="/srv/scratch/maximl/sklearn_cache") as tmp
 
         )
     else:
+        logging.info("Halving random search hpo")
+        
         grid = HalvingRandomSearchCV(
             estimator=model,
             param_distributions=param_distributions,
@@ -126,18 +167,17 @@ with tempfile.TemporaryDirectory(dir="/srv/scratch/maximl/sklearn_cache") as tmp
             aggressive_elimination=False,
             refit=True,
             n_jobs=snakemake.threads,
-            cv=5,
+            cv=inner_cv,
             scoring='balanced_accuracy',
             verbose=2,
             return_train_score=True,
             random_state=0
         )
 
-    test_fold = df.index.get_level_values("meta_group").map(lambda x: 0 if x == 2 else -1).values
     scores = cross_validate(
         grid, Xs, y,
         scoring=('balanced_accuracy', 'f1_macro', 'precision_macro', 'recall_macro'),
-        cv=PredefinedSplit(test_fold),
+        cv=outer_cv,
         return_train_score=True,
         return_estimator=True
     )
@@ -146,3 +186,5 @@ with tempfile.TemporaryDirectory(dir="/srv/scratch/maximl/sklearn_cache") as tmp
 
 with open(snakemake.output[0], "wb") as fh:
     pickle.dump(scores, fh)
+
+logging.info("Output at %s", snakemake.output[0])
