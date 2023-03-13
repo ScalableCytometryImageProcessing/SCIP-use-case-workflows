@@ -4,11 +4,11 @@ use rule preprocessing as CD7_preprocessing with:
         
 use rule quality_control as CD7_quality_control with:
     output:
-        columns="indices/CD7_columns.npy",
-        index="indices/CD7_index.npy",
-        ecc_vs_aspect = "figures/CD7_ecc_versus_aspect.png",
-        aspect = "figures/CD7_qc_major_minor_bf.png",
-        eccentricity = "figures/CD7_qc_ecc_bf.png"
+        columns="indices/{usecase}_columns.npy",
+        index="indices/{usecase}_index.npy",
+        ecc_vs_aspect = "figures/{usecase}_ecc_versus_aspect.png",
+        aspect = "figures/{usecase}_qc_major_minor_bf.png",
+        eccentricity = "figures/{usecase}_qc_ecc_bf.png"
 
 rule CD7:
     input:
