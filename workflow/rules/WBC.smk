@@ -53,14 +53,14 @@ rule WBC_feature_comparison:
     notebook:
         "../notebooks/WBC/feature_comparison.ipynb"
 
-rule WBC_all_hyperparameter_optimization:
+rule WBC_all_hyperparameter_optimization_scip:
     input:
         expand(
             "hpo/wbc_{grid}_{type}_{full}_{mask}_{model}.pickle",
             full=["full", "cyto"],
             grid=["rsh", "random"],
             mask=["otsu", "li", "otsuli"],
-            type=["ideas", "scip"],
+            type="scip",
             model="xgboost"
         )
 

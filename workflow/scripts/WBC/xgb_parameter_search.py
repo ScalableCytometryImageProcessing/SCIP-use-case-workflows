@@ -25,6 +25,10 @@ logging.basicConfig(
     format="%(asctime)s;%(levelname)s;%(message)s"
 )
 
+# import debugpy
+# debugpy.listen(5678)
+# debugpy.wait_for_client()
+
 logging.info("Snakemake config %s", snakemake.config)
 logging.info("Snakemake wildcards %s", snakemake.wildcards)
 
@@ -71,6 +75,16 @@ else:
         unique_combos = inner_index.set_index(['meta_group','meta_fix']).index.unique()
         test_fold_inner = inner_index.apply(lambda x: unique_combos.get_loc((x.meta_group, x.meta_fix)), axis="columns")
         inner_cv = PredefinedSplit(test_fold_inner)
+
+        # assert that for the predefined splits each test split consists of instances from only one sample
+        for outer_train, outer_test in outer_cv.split(df):
+            assert len(df.iloc[outer_test].reset_index().set_index(["meta_group", "meta_fix"]).index.unique()) == 1
+            for _, inner_test in inner_cv.split(df.iloc[outer_train]):
+                unique_combos = df.iloc[outer_train].iloc[inner_test].reset_index().set_index(
+                    ["meta_group", "meta_fix"]
+                ).index.unique()
+                assert len(unique_combos) == 1
+
     else:
         logging.info("Using default shuffled stratified KFold")
         inner_cv = 5
@@ -82,21 +96,21 @@ y = enc.transform(df["meta_label"])
 
 # selection of the generic channel features for SCIP
 if snakemake.wildcards["type"] == "ideas":
-    Xs = df.filter(regex="(bf420nm480nm|bf570nm595nm|m01|m06|m09|ssc)$")
+    X = df.filter(regex="(bf420nm480nm|bf570nm595nm|m01|m06|m09|ssc)$")
 else:
     if snakemake.wildcards["mask"] == "otsu":
-        Xs = df.filter(regex=".*_otsu_.*(BF1|BF2|SSC)$")
+        X = df.filter(regex=".*_otsu_.*(BF1|BF2|SSC)$")
     elif snakemake.wildcards["mask"] == "li":
-        Xs = df.filter(regex=".*_li_.*(BF1|BF2|SSC)$")
+        X = df.filter(regex=".*_li_.*(BF1|BF2|SSC)$")
     elif snakemake.wildcards["mask"] == "otsuli":
-        Xs = pandas.concat([
+        X = pandas.concat([
             df.filter(regex=".*_otsu_.*(SSC)$"),
             df.filter(regex=".*_li_.*(BF1|BF2)$"),
         ], axis=1)
     else:
         raise ValueError(snakemake.wildcards["mask"])
 
-logging.info("X, y shape (%s, %s)", Xs.shape, y.shape)
+logging.info("X, y shape (%s, %s)", X.shape, y.shape)  
 
 if snakemake.wildcards["model"] == 'true':
     logging.info("Using dummy model")
@@ -175,7 +189,7 @@ with tempfile.TemporaryDirectory(dir="/srv/scratch/maximl/sklearn_cache") as tmp
         )
 
     scores = cross_validate(
-        grid, Xs, y,
+        grid, X, y,
         scoring=('balanced_accuracy', 'f1_macro', 'precision_macro', 'recall_macro'),
         cv=outer_cv,
         return_train_score=True,
