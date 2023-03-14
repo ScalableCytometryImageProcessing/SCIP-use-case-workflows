@@ -75,7 +75,7 @@ rule WBC_hyperparameter_optimization:
     conda:
         "../envs/environment.yml"
     threads:
-        10
+        32
     log:
         "hyperparameter_optimization_{grid}_{type}_{full}_{mask}_{model}.log"
     script:
