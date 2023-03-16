@@ -7,7 +7,7 @@ import numpy
 import pyarrow.parquet as pq
 
 from xgboost import XGBClassifier
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, RobustScaler
 from sklearn.experimental import enable_halving_search_cv
 from sklearn.model_selection import (
     StratifiedKFold, cross_validate, HalvingRandomSearchCV, RandomizedSearchCV, PredefinedSplit)
@@ -120,7 +120,9 @@ if snakemake.wildcards["model"] == 'true':
 else:
     logging.info("Using XGB model")
 
-    steps = [
+    steps = []
+
+    steps.extend([
         RandomUnderSampler(sampling_strategy="majority", random_state=0),
         RandomOverSampler(sampling_strategy="not majority", random_state=0),
         XGBClassifier(
@@ -133,7 +135,7 @@ else:
             n_jobs=1,
             gpu_id=snakemake.config["gpu_id"]
         )
-    ]
+    ])
     param_distributions = {
         "xgbclassifier__max_depth": [7, 6, 5, 4, 3, 2],
         "xgbclassifier__learning_rate": [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01, 0.001],
